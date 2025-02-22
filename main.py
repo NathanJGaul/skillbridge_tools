@@ -3,7 +3,8 @@ from datetime import datetime
 import json
 from playwright.sync_api import sync_playwright
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+import psycopg2
 
 TABLE_WRAPPER_SELECTOR = "#location-table_wrapper"
 ROW_SELECTOR = "#location-table > tbody > tr[role=\"row\"]"
@@ -14,26 +15,27 @@ TOTAL_PAGES_SELECTOR = "#location-table_paginate > span > a:nth-child(5)"
 PAGE_LOAD_DELAY = 500  # Milliseconds
 
 class SkillbridgeOpportunity(BaseModel):
-    partner_program_agency: Optional[str] = None
-    service: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    duration_of_training: Optional[str] = None
-    employer_poc: Optional[str] = None
-    poc_email: Optional[str] = None
-    cost: Optional[str] = None
-    closest_installation: Optional[str] = None
-    opportunity_locations_by_state: Optional[str] = None
-    delivery_method: Optional[str] = None
-    target_mocs: Optional[str] = None
-    other_eligibility_factors: Optional[str] = None
-    other_prerequisite: Optional[str] = None
-    jobs_description: Optional[str] = None
-    summary_description: Optional[str] = None
-    job_family: Optional[str] = None
-    mou_organization: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    id: Optional[int] = Field(None, description="Database ID")
+    partner_program_agency: Optional[str] = Field(None, description="Partner/Program/Agency")
+    service: Optional[str] = Field(None, description="Service")
+    city: Optional[str] = Field(None, description="City")
+    state: Optional[str] = Field(None, description="State")
+    duration_of_training: Optional[str] = Field(None, description="Duration of Training")
+    employer_poc: Optional[str] = Field(None, description="Employer POC")
+    poc_email: Optional[str] = Field(None, description="POC Email")
+    cost: Optional[str] = Field(None, description="Cost")
+    closest_installation: Optional[str] = Field(None, description="Closest Installation")
+    opportunity_locations_by_state: Optional[str] = Field(None, description="Opportunity Locations by State")
+    delivery_method: Optional[str] = Field(None, description="Delivery Method")
+    target_mocs: Optional[str] = Field(None, description="Target MOCs")
+    other_eligibility_factors: Optional[str] = Field(None, description="Other Eligibility Factors")
+    other_prerequisite: Optional[str] = Field(None, description="Other/Prerequisite")
+    jobs_description: Optional[str] = Field(None, description="Jobs Description")
+    summary_description: Optional[str] = Field(None, description="Summary Description")
+    job_family: Optional[str] = Field(None, description="Job Family")
+    mou_organization: Optional[str] = Field(None, description="MOU Organization")
+    latitude: Optional[float] = Field(None, description="Latitude")
+    longitude: Optional[float] = Field(None, description="Longitude")
 
 def extract_coordinates(html: str) -> Optional[tuple[float, float]]:
     """Extracts latitude and longitude from the onclick attribute."""
@@ -119,10 +121,47 @@ def save_to_json(data: List[dict], filename: str) -> None:
     """Saves data to a JSON file."""
     with open(filename, 'w') as f:
         json.dump(data, f, indent=2)
+        
+def store_data_in_db(connection_string: str,data: List[dict]):
+    """Stores scraped data in the PostgreSQL database."""
+    try:
+        conn = psycopg2.connect(connection_string)
+        cur = conn.cursor()
+
+        for item in data:
+            insert_query = """
+                INSERT INTO skillbridge_opportunities (
+                    partner_program_agency, service, city, state, duration_of_training,
+                    employer_poc, poc_email, cost, closest_installation, opportunity_locations_by_state,
+                    delivery_method, target_mocs, other_eligibility_factors, other_prerequisite,
+                    jobs_description, summary_description, job_family, mou_organization,
+                    latitude, longitude
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """
+            values = (
+                item.get("partner_program_agency"), item.get("service"), item.get("city"),
+                item.get("state"), item.get("duration_of_training"), item.get("employer_poc"),
+                item.get("poc_email"), item.get("cost"), item.get("closest_installation"),
+                item.get("opportunity_locations_by_state"), item.get("delivery_method"),
+                item.get("target_mocs"), item.get("other_eligibility_factors"),
+                item.get("other_prerequisite"), item.get("jobs_description"),
+                item.get("summary_description"), item.get("job_family"),
+                item.get("mou_organization"), item.get("latitude"), item.get("longitude"),
+            )
+            cur.execute(insert_query, values)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("Data successfully stored in the database.")
+
+    except (Exception, psycopg2.Error) as error:
+        print("Error while connecting to PostgreSQL", error)
 
 if __name__ == "__main__":
     target_url = "https://skillbridge.osd.mil/locations.htm"
     search_term = "*"
+    connection_string = "dbname=postgres user=postgres host=localhost"
 
     results = scrape_search_results(target_url, search_term)
 
@@ -131,3 +170,5 @@ if __name__ == "__main__":
     filename = f"opportunities_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"
     save_to_json(results, filename)
     print(f"Data saved to {filename}")
+    
+    store_data_in_db(connection_string, results)
